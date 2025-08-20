@@ -15,7 +15,7 @@ node server.js
 cd backend
 npm run dev
 # or
-nodemon src/server.js
+nodemon server.js
 ```
 
 ## 📁 Server Files Explained
@@ -28,7 +28,7 @@ nodemon src/server.js
   - No database connection required
   - Perfect for frontend development and testing
 
-### `src/server.js` (Full Production Server)
+### `server.js` (Full Production Server)
 - **Purpose**: Complete production server with all features
 - **Features**:
   - Database connections (MongoDB)
@@ -97,8 +97,8 @@ The simple server allows connections from:
 
 ## 📝 Next Steps
 
-1. **For Development**: Use `server.js` (simple server)
-2. **For Production**: Use `src/server.js` (full server)
+1. **For Development**: Use `server.js`
+2. **For Production**: Use `server.js` (full server)
 3. **Add Database**: Connect MongoDB to get real data
 4. **Add Authentication**: Implement JWT tokens
 5. **Add Real Endpoints**: Replace placeholder responses with actual logic

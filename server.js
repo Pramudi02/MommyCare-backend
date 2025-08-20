@@ -1,461 +1,266 @@
-// Check for required dependencies
-try {
-  const express = require('express');
-  const cors = require('cors');
-  console.log('✅ Dependencies loaded successfully');
-} catch (error) {
-  console.error('❌ Failed to load dependencies:', error.message);
-  process.exit(1);
-}
-
 const express = require('express');
-const cors = require('cors');
 const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const http = require('http');
+const socketIo = require('socket.io');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./src/config/swagger');
+require('dotenv').config();
+
+// Import routes
+const authRoutes = require('./src/routes/auth');
+const adminRoutes = require('./src/routes/admin');
+const momRoutes = require('./src/routes/mom');
+const doctorRoutes = require('./src/routes/doctor');
+const midwifeRoutes = require('./src/routes/midwife');
+const serviceProviderRoutes = require('./src/routes/serviceProvider');
+const appointmentRoutes = require('./src/routes/appointments');
+const messageRoutes = require('./src/routes/messages');
+const aiRoutes = require('./src/routes/ai');
+const permissionRequestRoutes = require('./src/routes/permissionRequests');
+
+// Import middleware
+const errorHandler = require('./src/middleware/errorHandler');
+const { protect } = require('./src/middleware/auth');
+
+// Import config
+const { connectDB } = require('./src/config/database');
+
 const app = express();
-const port = process.env.PORT || 5000;
-
-// MongoDB connection - use environment variable
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (MONGODB_URI) {
-  // Connect to MongoDB if URI is provided
-  mongoose.connect(MONGODB_URI)
-    .then(() => {
-      console.log('✅ Connected to MongoDB successfully');
-    })
-    .catch((error) => {
-      console.error('❌ MongoDB connection failed:', error.message);
-      console.log('⚠️  Continuing with in-memory storage as fallback');
-    });
-} else {
-  console.log('⚠️  MONGODB_URI not set, using in-memory storage only');
-}
-
-// Simple in-memory user store for demo purposes (fallback)
-const users = new Map();
-
-console.log('🚀 Starting MommyCare Server...');
-console.log('📊 Port:', port);
-console.log('🔄 Version: 2.7 - Environment Variables Only (No Hardcoded Secrets)');
-console.log('🌐 CORS Status: Enhanced for Railway deployment');
-
-// Environment variable validation
-console.log('🔧 Environment Variables:');
-console.log('   NODE_ENV:', process.env.NODE_ENV || 'not set');
-console.log('   PORT:', process.env.PORT || 'not set (using default 5000)');
-console.log('   ADDITIONAL_CORS_ORIGINS:', process.env.ADDITIONAL_CORS_ORIGINS || 'not set');
-
-// CORS middleware - allow frontend to connect
+const server = http.createServer(app);
 const allowedOrigins = [
-  'http://localhost:5173', 
-  'http://localhost:5174', 
-  'http://localhost:3000',
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  process.env.FRONTEND_URL_ALT || 'http://localhost:5174',
+  // Allow Railway healthcheck
+  'https://mommycare-production-f0d0.up.railway.app',
+  // Allow Vercel frontend
   'https://mommy-care.vercel.app',
-  'https://mommy-care-git-main-pramudi02s-projects.vercel.app',
-  // Railway healthcheck origins
-  'https://railway.app',
-  'https://*.railway.app'
+  'https://mommy-care-git-main-pramudi02s-projects.vercel.app'
 ];
 
-// Add any additional origins from environment variable
-if (process.env.ADDITIONAL_CORS_ORIGINS) {
-  allowedOrigins.push(...process.env.ADDITIONAL_CORS_ORIGINS.split(','));
-}
-
-// FALLBACK: If no environment variables, allow all origins
-if (!process.env.NODE_ENV || process.env.NODE_ENV === 'development') {
-  console.log('⚠️  Development mode detected - allowing all origins');
-  allowedOrigins.push('*');
-}
-
-console.log('🌐 CORS Configuration:');
-console.log('   Allowed origins:', allowedOrigins);
-
-// Simplified CORS configuration - FORCE ALLOW ALL
-app.use((req, res, next) => {
-  console.log('🔍 CORS middleware processing:', req.method, req.url);
-  console.log('   Origin:', req.headers.origin);
-  console.log('   User-Agent:', req.headers['user-agent']);
-  
-  // FORCE ALLOW ALL ORIGINS - TEMPORARY FIX
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'false'); // Changed to false for * origin
-  
-  console.log('✅ CORS headers set for:', req.method, req.url);
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    console.log('✅ Handling OPTIONS preflight request');
-    console.log('✅ Sending 200 response for preflight');
-    res.status(200).end();
-    return;
+const io = socketIo(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST']
   }
-  
-  next();
 });
 
-// Simplified cors package configuration
+// Connect to MongoDB and start server
+const startServer = async () => {
+  try {
+    console.log('🔌 Connecting to all databases...');
+    console.log('📊 Environment:', process.env.NODE_ENV || 'development');
+    console.log('🌐 Port:', process.env.PORT || 5000);
+    console.log('🔄 Version: 3.2 - JWT Secret & MongoDB Fixes');
+    console.log('🌐 CORS Status: Enhanced for Vercel frontend');
+    
+    // Check if MongoDB URI is set (with fallback in database.js)
+    if (!process.env.MONGODB_URI) {
+      console.log('⚠️  MONGODB_URI not set, using hardcoded fallback from database.js');
+    }
+    
+    await connectDB();
+    console.log('✅ All database connections established');
+    
+    const PORT = process.env.PORT || 5000;
+    
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 MommyCare Backend Server running on port ${PORT}`);
+      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+      console.log(`🔗 Railway health check: http://localhost:${PORT}/api/health`);
+      console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+      console.log('✅ Server is ready to accept connections');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    console.error('🔍 Error details:', error);
+    process.exit(1);
+  }
+};
+
+// Security middleware
+app.use(helmet());
 app.use(cors({
-  origin: true, // Allow all origins
-  credentials: false, // Disable credentials for * origin
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200
+  origin: (origin, callback) => {
+    console.log('🔍 CORS check for origin:', origin);
+    
+    // Allow requests with no origin (like Railway healthcheck)
+    if (!origin) {
+      console.log('✅ Allowing request with no origin');
+      return callback(null, true);
+    }
+    
+    // Allow Railway healthcheck
+    if (origin.includes('railway.app')) {
+      console.log('✅ Allowing Railway origin:', origin);
+      return callback(null, true);
+    }
+    
+    // Allow allowed origins
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ Allowing origin:', origin);
+      return callback(null, true);
+    }
+    
+    console.log('❌ CORS blocked origin:', origin);
+    console.log('📋 Allowed origins:', allowedOrigins);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
 }));
 
-// Basic middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
 
-// Health check endpoints
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Compression middleware
+app.use(compression());
+
+// Logging middleware
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
+}
+
+// Static files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// Health check endpoint
 app.get('/health', (req, res) => {
-  console.log('✅ Health check requested at:', new Date().toISOString());
   res.status(200).json({
     status: 'success',
     message: 'MommyCare API is running',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    environment: process.env.NODE_ENV || 'development',
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    database: 'connected' // We'll enhance this later
   });
 });
 
-// Test CORS endpoint
-app.get('/api/test-cors', (req, res) => {
-  console.log('🧪 CORS test endpoint called');
-  console.log('   Origin:', req.headers.origin);
-  console.log('   Headers:', req.headers);
-  
-  // Force CORS headers for this endpoint
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  res.status(200).json({
-    status: 'success',
-    message: 'CORS test successful',
-    origin: req.headers.origin,
-    timestamp: new Date().toISOString(),
-    version: '2.4 - Environment Variable Fix'
-  });
-});
-
-// Environment test endpoint
-app.get('/api/env-test', (req, res) => {
-  console.log('🔧 Environment test endpoint called');
-  
-  // Force CORS headers
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  res.status(200).json({
-    status: 'success',
-    message: 'Environment variables check',
-    data: {
-      NODE_ENV: process.env.NODE_ENV || 'not set',
-      PORT: process.env.PORT || 'not set (using default)',
-      ADDITIONAL_CORS_ORIGINS: process.env.ADDITIONAL_CORS_ORIGINS || 'not set',
-      timestamp: new Date().toISOString(),
-      version: '2.4 - Environment Variable Fix'
-    }
-  });
-});
-
-// Simple test endpoint
-app.get('/api/test', (req, res) => {
-  res.status(200).json({
-    status: 'success',
-    message: 'Server is working!',
-    timestamp: new Date().toISOString(),
-    cors: 'enabled',
-    version: '2.0'
-  });
-});
-
+// Enhanced health check for Railway
 app.get('/api/health', (req, res) => {
-  console.log('✅ API Health check requested at:', new Date().toISOString());
-  res.status(200).json({
-    status: 'success',
-    message: 'MommyCare API is running',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Debug endpoint to see stored users (remove in production)
-app.get('/api/debug/users', (req, res) => {
-  const userList = Array.from(users.values()).map(user => ({
-    email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    role: user.role,
-    createdAt: user.createdAt
-  }));
-  
-  res.status(200).json({
-    status: 'success',
-    message: 'Stored users',
-    data: {
-      totalUsers: users.size,
-      users: userList
-    }
-  });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    message: 'MommyCare Backend API',
-    status: 'running',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      apiHealth: '/api/health',
-      auth: '/api/auth/*',
-      mom: '/api/mom/*',
-      doctor: '/api/doctor/*',
-      midwife: '/api/midwife/*'
-    }
-  });
-});
-
-// Basic API endpoints that frontend needs
-app.get('/api/auth/me', (req, res) => {
-  console.log('🔐 Auth me endpoint called');
-  res.status(200).json({
-    status: 'success',
-    message: 'Auth endpoint working',
-    data: { 
-      message: 'This is a placeholder endpoint',
-      note: 'Connect to database for real user data'
-    }
-  });
-});
-
-// User registration endpoint
-app.post('/api/auth/register', (req, res) => {
-  console.log('📝 User registration called:', req.body);
-  
-  // FORCE CORS headers for registration
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  // Check if user already exists
-  if (users.has(req.body.email)) {
-    return res.status(400).json({
+  try {
+    res.status(200).json({
+      status: 'success',
+      message: 'MommyCare API is running',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      database: 'connected'
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(500).json({
       status: 'error',
-      message: 'User with this email already exists'
+      message: 'Health check failed',
+      error: error.message
     });
   }
-  
-  // Create new user
-  const newUser = {
-    _id: 'user-' + Date.now(),
-    firstName: req.body.firstName,
-    lastName: req.body.lastName,
-    email: req.body.email,
-    role: req.body.role,
-    password: req.body.password, // In real app, this would be hashed
-    isEmailVerified: true,
-    isActive: true,
-    createdAt: new Date().toISOString()
-  };
-  
-  // Store user in memory
-  users.set(req.body.email, newUser);
-  
-  console.log('✅ User stored:', { email: newUser.email, role: newUser.role });
-  
-  res.status(201).json({
-    status: 'success',
-    message: 'User registered successfully',
-    data: {
-      user: {
-        _id: newUser._id,
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-        email: newUser.email,
-        role: newUser.role,
-        isEmailVerified: newUser.isEmailVerified,
-        isActive: newUser.isActive
-      },
-      token: 'token-' + Date.now()
-    }
+});
+
+// Swagger API Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'MommyCare API Documentation'
+}));
+
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/mom', protect, momRoutes);
+app.use('/api/doctor', protect, doctorRoutes);
+app.use('/api/midwife', protect, midwifeRoutes);
+app.use('/api/service-provider', protect, serviceProviderRoutes);
+app.use('/api/appointments', protect, appointmentRoutes);
+app.use('/api/messages', protect, messageRoutes);
+app.use('/api/ai', protect, aiRoutes);
+app.use('/api/permission-requests', permissionRequestRoutes);
+
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+
+  // Join user to their personal room
+  socket.on('join', (userId) => {
+    socket.join(`user_${userId}`);
+    console.log(`User ${userId} joined their room`);
+  });
+
+  // Handle private messages
+  socket.on('private_message', (data) => {
+    io.to(`user_${data.recipientId}`).emit('new_message', data);
+  });
+
+  // Handle appointment updates
+  socket.on('appointment_update', (data) => {
+    io.to(`user_${data.userId}`).emit('appointment_updated', data);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
   });
 });
 
-// User login endpoint
-app.post('/api/auth/login', (req, res) => {
-  console.log('🔐 User login called:', req.body);
-  
-  // FORCE CORS headers for login
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  // Find user by email
-  const user = users.get(req.body.email);
-  
-  if (!user) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'User not found. Please register first.'
-    });
-  }
-  
-  // Check password (in real app, this would be hashed comparison)
-  if (user.password !== req.body.password) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Invalid password'
-    });
-    }
-  
-  console.log('✅ User logged in:', { email: user.email, role: user.role });
-  
-  res.status(200).json({
-    status: 'success',
-    message: 'Login successful',
-    data: {
-      user: {
-        _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-        isEmailVerified: user.isEmailVerified,
-        isActive: user.isActive
-      },
-      token: 'token-' + Date.now()
-    }
-  });
-});
+// Error handling middleware
+app.use(errorHandler);
 
-// Forgot password endpoint
-app.post('/api/auth/forgot-password', (req, res) => {
-  console.log('🔑 Forgot password called:', req.body);
-  res.status(200).json({
-    status: 'success',
-    message: 'Password reset email sent (placeholder)',
-    data: {
-      message: 'This is a placeholder endpoint - implement email service later'
-    }
-  });
-});
-
-app.get('/api/mom/clinic-visit-requests', (req, res) => {
-  console.log('🏥 Clinic visit requests endpoint called');
-  res.status(200).json({
-    status: 'success',
-    message: 'Clinic visit requests endpoint working',
-    data: []
-  });
-});
-
-app.post('/api/mom/clinic-visit-requests', (req, res) => {
-  console.log('🏥 Create clinic visit request called');
-  res.status(201).json({
-    status: 'success',
-    message: 'Clinic visit request created (placeholder)',
-    data: { id: 'temp-id', ...req.body }
-  });
-});
-
-// Doctor endpoints
-app.get('/api/doctor/appointments', (req, res) => {
-  console.log('👨‍⚕️ Doctor appointments endpoint called');
-  res.status(200).json({
-    status: 'success',
-    message: 'Doctor appointments endpoint working',
-    data: []
-  });
-});
-
-// Midwife endpoints
-app.get('/api/midwife/appointments', (req, res) => {
-  console.log('👩‍⚕️ Midwife appointments endpoint called');
-  res.status(200).json({
-    status: 'success',
-    message: 'Midwife appointments endpoint working',
-    data: []
-  });
-});
-
-// Service provider endpoints
-app.get('/api/service-provider/orders', (req, res) => {
-  console.log('🛍️ Service provider orders endpoint called');
-  res.status(200).json({
-    status: 'success',
-    message: 'Service provider orders endpoint working',
-    data: []
-  });
-});
-
-// Catch-all for undefined routes
+// 404 handler
 app.use('*', (req, res) => {
-  console.log(`❌ Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     status: 'error',
-    message: 'Route not found',
-    path: req.originalUrl,
-    availableEndpoints: [
-      '/health',
-      '/api/health',
-      '/api/debug/users',
-      '/api/auth/me',
-      '/api/auth/register',
-      '/api/auth/login',
-      '/api/auth/forgot-password',
-      '/api/mom/clinic-visit-requests',
-      '/api/doctor/appointments',
-      '/api/midwife/appointments',
-      '/api/service-provider/orders'
-    ]
+    message: `Route ${req.originalUrl} not found`
   });
 });
 
-// Start server
-const server = app.listen(port, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${port}`);
-  console.log(`🔗 Health check: http://localhost:${port}/health`);
-  console.log(`🔗 API Health: http://localhost:${port}/api/health`);
-  console.log('🌐 CORS enabled for frontend');
-  console.log('🚀 Server is ready and responding!');
-  console.log('📝 Available endpoints:');
-  console.log('   - GET  /health');
-  console.log('   - GET  /api/health');
-  console.log('   - GET  /api/debug/users');
-  console.log('   - GET  /api/auth/me');
-  console.log('   - POST /api/auth/register');
-  console.log('   - POST /api/auth/login');
-  console.log('   - POST /api/auth/forgot-password');
-  console.log('   - GET  /api/mom/clinic-visit-requests');
-  console.log('   - POST /api/mom/clinic-visit-requests');
-  console.log('   - GET  /api/doctor/appointments');
-  console.log('   - GET  /api/midwife/appointments');
-  console.log('   - GET  /api/service-provider/orders');
+// Make io accessible to routes
+app.set('io', io);
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err, promise) => {
+  console.log(`⚠️ Unhandled Rejection: ${err.message}`);
 });
 
-// Error handling
-server.on('error', (err) => {
-  console.error('❌ Server error:', err);
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.log(`❌ Uncaught Exception: ${err.message}`);
+  server.close(() => process.exit(1));
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
+// Start the server
+console.log('🚀 Starting MommyCare server...');
+console.log('📁 Current working directory:', process.cwd());
+console.log('🔧 Node version:', process.version);
+console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
+
+startServer().catch(error => {
+  console.error('❌ Failed to start server:', error);
+  console.error('🔍 Full error details:', error);
+  process.exit(1);
 });
 
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
-});
+module.exports = { app, server, io };
+
+

@@ -248,7 +248,7 @@ npm install
 ```bash
 npm start
 # or
-node src/server.js
+node server.js
 ```
 
 ### 4. Test System
