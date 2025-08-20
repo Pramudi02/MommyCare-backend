@@ -56,36 +56,33 @@ const io = socketIo(server, {
 
 // Connect to MongoDB and start server
 const startServer = async () => {
+  console.log('🔌 Initializing server...');
+  console.log('📊 Environment:', process.env.NODE_ENV || 'development');
+  console.log('🌐 Port:', process.env.PORT || 5000);
+  console.log('🔄 Version: 3.2 - JWT Secret & MongoDB Fixes');
+  console.log('🌐 CORS Status: Enhanced for Vercel frontend');
+
+  // Try to connect to DB, but don't block server startup if it fails
   try {
-    console.log('🔌 Connecting to all databases...');
-    console.log('📊 Environment:', process.env.NODE_ENV || 'development');
-    console.log('🌐 Port:', process.env.PORT || 5000);
-    console.log('🔄 Version: 3.2 - JWT Secret & MongoDB Fixes');
-    console.log('🌐 CORS Status: Enhanced for Vercel frontend');
-    
-    // Check if MongoDB URI is set (with fallback in database.js)
     if (!process.env.MONGODB_URI) {
-      console.log('⚠️  MONGODB_URI not set, using hardcoded fallback from database.js');
+      console.log('⚠️  MONGODB_URI not set; server will start without DB connection');
     }
-    
     await connectDB();
     console.log('✅ All database connections established');
-    
-    const PORT = process.env.PORT || 5000;
-    
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 MommyCare Backend Server running on port ${PORT}`);
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-      console.log(`🔗 Railway health check: http://localhost:${PORT}/api/health`);
-      console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-      console.log('✅ Server is ready to accept connections');
-    });
   } catch (error) {
-    console.error('❌ Failed to start server:', error.message);
-    console.error('🔍 Error details:', error);
-    process.exit(1);
+    console.error('❌ Database connection failed:', error.message);
+    console.error('⚠️  Continuing to start server without database connection');
   }
+
+  const PORT = process.env.PORT || 5000;
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 MommyCare Backend Server running on port ${PORT}`);
+    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔗 Railway health check: http://localhost:${PORT}/api/health`);
+    console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+    console.log('✅ Server is ready to accept connections');
+  });
 };
 
 // Security middleware
